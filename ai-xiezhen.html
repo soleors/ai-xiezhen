@@ -1,0 +1,446 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 写真生成器</title>
+<style>
+  /* ========== 全局 ========== */
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI",
+                 "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    background: #f5f6f8;
+    color: #22272e;
+    line-height: 1.6;
+    padding: 20px 16px 48px;
+  }
+
+  /* 内容容器：限制最大宽度，手机上自动撑满 */
+  .wrap { max-width: 520px; margin: 0 auto; }
+
+  /* ========== 标题区 ========== */
+  h1 { font-size: 26px; text-align: center; margin-bottom: 6px; }
+  .sub { text-align: center; color: #6d7480; font-size: 14px; margin-bottom: 24px; }
+
+  /* ========== 通用卡片 ========== */
+  .card {
+    background: #fff;
+    border-radius: 16px;
+    padding: 22px 20px;
+    margin-bottom: 18px;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, .05);
+  }
+  .card-title { font-size: 15px; font-weight: 600; margin-bottom: 14px; }
+
+  /* ========== ① 上传区 ========== */
+  /* 整个虚线框可点击，里面藏一个真正的 input */
+  .drop {
+    border: 2px dashed #c8ccd4;
+    border-radius: 12px;
+    padding: 32px 16px;
+    text-align: center;
+    cursor: pointer;
+    transition: border-color .2s, background .2s;
+  }
+  .drop:hover { border-color: #6b7cff; background: #f7f8ff; }
+  .drop-icon { font-size: 34px; display: block; margin-bottom: 8px; }
+  .drop-text { color: #6d7480; font-size: 14px; }
+
+  /* 真正的文件选择框：藏起来，由 drop 区代为触发 */
+  #fileInput { display: none; }
+
+  /* 预览图：默认不显示，选完图才出现 */
+  .preview {
+    display: none;
+    margin-top: 16px;
+    text-align: center;
+  }
+  .preview img {
+    max-width: 100%;
+    max-height: 320px;
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, .12);
+  }
+  .preview.show { display: block; }
+
+  /* ========== ② 生成按钮 ========== */
+  .btn {
+    width: 100%;
+    padding: 15px;
+    font-size: 17px;
+    font-weight: 600;
+    border: none;
+    border-radius: 12px;
+    background: #6b7cff;
+    color: #fff;
+    cursor: pointer;
+    transition: opacity .2s;
+  }
+  .btn:hover { opacity: .88; }
+  .btn:active { opacity: .7; }
+  /* 禁用状态：没选图时点不了 */
+  .btn:disabled { background: #c8ccd4; cursor: not-allowed; }
+  /* 生成中：视觉上区分，且靠 disabled 防止重复点击 */
+  .btn.loading { background: #9aa3ff; cursor: wait; }
+
+  /* 次要按钮（下载）：描边样式，和主按钮区分层级 */
+  .btn-secondary {
+    background: #fff;
+    color: #6b7cff;
+    border: 2px solid #6b7cff;
+    margin-top: 14px;
+  }
+  .btn-secondary:hover { background: #f2f3ff; opacity: 1; }
+
+  /* ========== ③ 结果区（占位框） ========== */
+  .placeholder {
+    border: 2px dashed #dfe2e8;
+    border-radius: 12px;
+    padding: 48px 16px;
+    text-align: center;
+    color: #a8adb8;
+    font-size: 14px;
+  }
+  /* 出图后：占位框藏起来，这里显示写真 */
+  .result-img { display: none; margin-top: 16px; text-align: center; }
+  .result-img.show { display: block; }
+  .result-img img {
+    width: 100%;
+    max-height: 460px;
+    object-fit: cover;
+    border-radius: 12px;
+    box-shadow: 0 4px 18px rgba(0, 0, 0, .14);
+  }
+  .result-tip { font-size: 13px; color: #6d7480; margin-top: 10px; }
+
+  /* ========== 顶部运行提示（必须走 localhost 才能读到 .env） ========== */
+  .notice {
+    display: none;
+    margin-bottom: 18px;
+    padding: 12px 14px;
+    background: #fff9db;
+    border: 1px solid #ffe066;
+    border-left: 4px solid #f59f00;
+    border-radius: 10px;
+    font-size: 13px;
+    color: #7f5b00;
+    line-height: 1.8;
+  }
+  .notice.show { display: block; }
+  .notice code {
+    background: #fff3bf;
+    padding: 1px 6px;
+    border-radius: 4px;
+    font-family: Consolas, Menlo, monospace;
+  }
+
+  /* ========== 错误提示（显示在页面上，不用 alert） ========== */
+  .error-box {
+    display: none;
+    margin-top: 14px;
+    padding: 14px 16px;
+    background: #fff5f5;
+    border: 1px solid #ffc9c9;
+    border-left: 4px solid #e03131;
+    border-radius: 10px;
+    color: #a61e1e;
+    font-size: 14px;
+    line-height: 1.7;
+    white-space: pre-line;   /* 让报错里的换行显示出来 */
+    word-break: break-all;   /* 长 URL / 长报错不撑破布局 */
+  }
+  .error-box.show { display: block; }
+  .error-box .err-code { font-weight: 600; display: block; margin-bottom: 4px; }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+
+  <h1>AI 写真生成器</h1>
+  <p class="sub">上传一张自拍，生成你的专属写真</p>
+
+  <!-- 双击打开（file://）时提示：那样读不到 .env -->
+  <div class="notice" id="notice">
+    ⚠️ 你现在是<b>双击打开</b>的这个文件，浏览器读不到 <code>.env</code>，无法调用 API。<br>
+    请先在终端进入本目录执行 <code>node server.js</code>，再访问
+    <code>http://localhost:3000</code>
+  </div>
+
+  <!-- ① 上传区 -->
+  <div class="card">
+    <p class="card-title">① 选择照片</p>
+
+    <div class="drop" id="drop">
+      <span class="drop-icon">📷</span>
+      <span class="drop-text">点击选择一张自拍图片</span>
+    </div>
+
+    <!-- 真正的 input，accept 限制只能选图片 -->
+    <input type="file" id="fileInput" accept="image/*">
+
+    <!-- 预览：选完图后 img 的 src 会被 JS 填上 -->
+    <div class="preview" id="preview">
+      <img id="previewImg" alt="你选择的照片预览">
+    </div>
+  </div>
+
+  <!-- ② 生成按钮 -->
+  <div class="card">
+    <p class="card-title">② 生成写真</p>
+    <button class="btn" id="genBtn" disabled>生成写真</button>
+  </div>
+
+  <!-- ③ 结果区 -->
+  <div class="card">
+    <p class="card-title">③ 生成结果</p>
+    <div class="placeholder" id="result">
+      写真会显示在这里<br>（选一张自拍，然后点生成）
+    </div>
+
+    <!-- 错误信息直接显示在页面上，不用 alert -->
+    <div class="error-box" id="errBox"></div>
+
+    <!-- 生成的写真显示在这里 -->
+    <div class="result-img" id="resultImgBox">
+      <img id="resultImg" alt="AI 生成的写真">
+      <p class="result-tip" id="resultTip"></p>
+    </div>
+
+    <!-- 下载按钮：SPEC 的"必须有"，没出图前不显示 -->
+    <button class="btn btn-secondary" id="dlBtn" style="display:none">下载写真</button>
+  </div>
+
+</div>
+
+<script>
+  // ========== 拿到页面里的元素（后面用 JS 操作它们） ==========
+  var drop        = document.getElementById('drop');
+  var fileInput   = document.getElementById('fileInput');
+  var preview     = document.getElementById('preview');
+  var previewImg  = document.getElementById('previewImg');
+  var genBtn      = document.getElementById('genBtn');
+  var result      = document.getElementById('result');
+  var errBox      = document.getElementById('errBox');
+  var resultBox   = document.getElementById('resultImgBox');
+  var resultImg   = document.getElementById('resultImg');
+  var resultTip   = document.getElementById('resultTip');
+  var dlBtn       = document.getElementById('dlBtn');
+  var notice      = document.getElementById('notice');
+
+  // ========== 接口地址 ==========
+  // 注意：这里指向"本地代理"，不是即梦的地址。
+  // API Key 由 server.js 从 .env 读出来，前端完全不接触密钥。
+  var API_URL    = '/api/generate';
+  var DOWNLOAD_URL = '/api/download';
+  var TIMEOUT_MS = 150000;   // 前端再兜一层，比代理的 150 秒略长，避免两边同时掐
+
+  // 用户上传的自拍（完整 dataURL，含 data:image/...;base64, 前缀）
+  var selfieDataUrl = '';
+  // 当前要下载的图片地址
+  var currentImage = '';
+
+  // ========== 功能 0：判断是不是用 http://localhost 打开的 ==========
+  // 双击打开时协议是 file:，代理没起来，请求必然失败 —— 提前告诉用户
+  if (location.protocol === 'file:') {
+    notice.classList.add('show');
+  }
+
+  // ========== 功能 1：点虚线框 → 弹出文件选择 ==========
+  drop.addEventListener('click', function () {
+    fileInput.click();
+  });
+
+  // ========== 功能 2：选完图 → 立即预览 + 转成 base64 ==========
+  fileInput.addEventListener('change', function () {
+    // files 是选中的文件列表，[0] 取第一个
+    var file = fileInput.files[0];
+    if (!file) return;
+
+    // FileReader 是浏览器自带的读本地文件的工具
+    var reader = new FileReader();
+    reader.onload = function (e) {
+      // e.target.result 形如 "data:image/jpeg;base64,****（一长串）"
+      previewImg.src = e.target.result;          // 给 img 显示用
+
+      // 实测结论：即梦的 image 字段要的是"带前缀的完整 dataURL"。
+      // 只发纯 base64 会被它当成网址去解析，报 invalid url specified。
+      selfieDataUrl = e.target.result;
+
+      preview.classList.add('show');
+      drop.style.display = 'none';
+      genBtn.disabled = false;
+      hideError();
+      showMsg('已选好照片（' + Math.round(file.size / 1024) + ' KB），可以点「生成写真」了');
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // ========== 功能 3：点生成 → 请求本地代理，由它代调即梦 ==========
+  genBtn.addEventListener('click', function () {
+    // 前置检查：缺什么就直接在页面上说，不发请求
+    if (!selfieDataUrl) { showError('还没有照片', '请先选择一张自拍图片。'); return; }
+    if (location.protocol === 'file:') {
+      showError('打开方式不对', '你现在是双击打开的文件，读不到 .env。\n请先运行 node server.js，再访问 http://localhost:3000');
+      return;
+    }
+
+    hideError();
+    setLoading(true);
+
+    // 超时保护：代理那边已经有 150 秒上限，这里再兜一层
+    var ctrl = new AbortController();
+    var timer = setTimeout(function () { ctrl.abort(); }, TIMEOUT_MS);
+
+    fetch(API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },   // 不需要 Authorization，Key 由代理加
+      body: JSON.stringify({ image: selfieDataUrl }),     // 只发自拍，模型/prompt/尺寸都在代理里定
+      signal: ctrl.signal
+    })
+      .then(function (resp) {
+        // 先按文本读，再尝试解析成 JSON —— 这样即使返回的不是标准 JSON 也能看到原文
+        return resp.text().then(function (txt) {
+          var data = null;
+          try { data = JSON.parse(txt); } catch (e) { /* 不是 JSON，保留原文 */ }
+          if (!resp.ok) {
+            var apiErr = data && data.error ? data.error : null;
+            throw {
+              kind: 'api',
+              status: resp.status,
+              code: apiErr ? (apiErr.code || apiErr.type || '未知') : '未知',
+              message: apiErr ? (apiErr.message || txt) : txt
+            };
+          }
+          return data;
+        });
+      })
+      .then(function (data) {
+        // 要素 4：输出 —— 从 data[0].url 里取图片地址
+        var url = data && data.data && data.data[0] && data.data[0].url;
+        if (!url) throw { kind: 'api', status: 200, code: '响应格式异常', message: '没在返回里找到图片地址：' + JSON.stringify(data).slice(0, 300) };
+        showResult(url, '✅ 真人写实写真已生成');
+      })
+      .catch(function (err) {
+        // 分情况给出人能看懂的说明
+        if (err && err.name === 'AbortError') {
+          showError('生成超时', '等了 2 分半还没返回，已中断。\n可能模型当时排队繁忙，重试一次。');
+        } else if (err && err.kind === 'api') {
+          showError('接口报错（HTTP ' + err.status + ' · ' + err.code + '）', err.message + hintFor(err.status));
+        } else {
+          // 连本地代理都没答上：多半是 server.js 没启动
+          showError('连不上本地服务', '请求没发出去，本地代理没在跑。\n详情：' + ((err && err.message) || err) +
+            '\n\n解决：终端进入本目录执行 node server.js，然后访问 http://localhost:3000');
+        }
+      })
+      .finally(function () {
+        clearTimeout(timer);
+        setLoading(false);
+      });
+  });
+
+  // ========== 按钮的"生成中"状态 ==========
+  function setLoading(on) {
+    genBtn.disabled = on;
+    if (on) {
+      genBtn.classList.add('loading');
+      genBtn.innerText = '生成中…（约需 10-60 秒）';
+      showMsg('⏳ AI 正在画，最多等 2 分钟…');
+      resultBox.classList.remove('show');
+      dlBtn.style.display = 'none';
+    } else {
+      genBtn.classList.remove('loading');
+      genBtn.innerText = '重新生成';
+    }
+  }
+
+  // ========== 按状态码给一句人话建议 ==========
+  function hintFor(status) {
+    if (status === 401) return '\n\n怎么办：Key 不对或没填全。回控制台重新复制一次 API Key。';
+    if (status === 403) return '\n\n怎么办：Key 是对的，但这个模型没开通。去火山方舟控制台开通 doubao-seedream 的使用权限。';
+    if (status === 400) return '\n\n怎么办：请求内容有问题。常见原因是图片太大或格式不支持，换一张小一点的 jpg 试试。';
+    if (status === 429) return '\n\n怎么办：请求太频繁或额度用完了。等一会儿再试，或检查账户余额。';
+    return '';
+  }
+
+  // ========== 功能 4：显示结果 + 出下载按钮（SPEC 的"必须有"） ==========
+  function showResult(imageSrc, tip) {
+    currentImage = imageSrc;
+    hideError();
+    result.style.display = 'none';
+    resultImg.src = imageSrc;
+    resultTip.innerText = tip;
+    resultBox.classList.add('show');
+    dlBtn.style.display = 'block';
+  }
+
+  // ========== 页面提示（中性消息） ==========
+  function showMsg(text) {
+    result.style.display = 'block';
+    result.textContent = text;
+    result.style.color = '#6d7480';
+  }
+
+  // ========== 错误显示在页面上（不用 alert） ==========
+  function showError(title, detail) {
+    errBox.textContent = '';                       // 先清空
+    var head = document.createElement('span');
+    head.className = 'err-code';
+    head.textContent = '❌ ' + title;
+    errBox.appendChild(head);
+    errBox.appendChild(document.createTextNode(detail || ''));
+    errBox.classList.add('show');
+    result.style.display = 'none';                 // 出错时不需要占位提示
+  }
+
+  function hideError() {
+    errBox.classList.remove('show');
+  }
+
+  // ========== 功能 5：下载到本地 ==========
+  dlBtn.addEventListener('click', function () {
+    if (!currentImage) { showError('没有可下载的图片', '请先生成一张写真。'); return; }
+
+    var a = document.createElement('a');
+    a.download = '我的AI写真.jpg';        // 下载后的文件名
+
+    // 本地 dataURL（比如还没接 API 时的自拍）：直接给 href 就能下载
+    if (currentImage.indexOf('data:') === 0) {
+      a.href = currentImage;
+      a.click();
+      return;
+    }
+
+    // API 返回的是跨域图片地址，浏览器不允许前端直接抓。
+    // 所以走本地代理的 /api/download —— 由 Node 把图抓回来，
+    // 加上 Content-Disposition: attachment 同源返回，下载就稳定了。
+    dlBtn.disabled = true;
+    dlBtn.innerText = '准备下载…';
+
+    fetch(DOWNLOAD_URL + '?url=' + encodeURIComponent(currentImage))
+      .then(function (r) {
+        if (!r.ok) return r.text().then(function (t) { throw new Error(t || ('HTTP ' + r.status)); });
+        return r.blob();
+      })
+      .then(function (blob) {
+        a.href = URL.createObjectURL(blob);
+        a.click();
+        URL.revokeObjectURL(a.href);      // 用完释放内存
+      })
+      .catch(function (err) {
+        // 代理抓不到就退一步：新窗口打开原图，让用户右键另存
+        showError('下载失败', ((err && err.message) || err) +
+          '\n已在新窗口打开原图，可以右键选「图片另存为」。');
+        window.open(currentImage, '_blank');
+      })
+      .finally(function () {
+        dlBtn.disabled = false;
+        dlBtn.innerText = '下载写真';
+      });
+  });
+</script>
+
+</body>
+</html>
